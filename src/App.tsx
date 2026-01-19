@@ -23,7 +23,8 @@ import {
   AlertCircle, Moon, Sun, X, Check, ChevronLeft, ChevronRight, 
   ArrowUpRight, ArrowDownRight, Filter, Calendar, LogOut, Lock,
   AlertTriangle, CreditCard, Banknote, Landmark, PieChart,
-  ArrowUpDown, List as ListIcon, LayoutGrid, CalendarRange, BarChart3
+  ArrowUpDown, List as ListIcon, LayoutGrid, CalendarRange, BarChart3,
+  Flame
 } from 'lucide-react';
 
 // ==========================================
@@ -497,6 +498,39 @@ export default function App() {
       return Object.entries(trends).map(([name, value]) => ({ name, value }));
   }, [filteredTransactions, filterMode]);
 
+  // Heatmap Data Calculation
+  const heatmapData = useMemo(() => {
+      const { start, end } = currentRange;
+      // For month view, we want to show the full calendar grid (even empty days)
+      const days = [];
+      const map = {};
+      let maxVal = 0;
+      
+      // 1. Populate map with spending
+      transactions.forEach(t => {
+          if (t.type === 'expense' && t.date >= start && t.date <= end) {
+              const dayStr = t.date.toLocaleDateString('en-CA'); // YYYY-MM-DD local
+              map[dayStr] = (map[dayStr] || 0) + t.amount;
+              if (map[dayStr] > maxVal) maxVal = map[dayStr];
+          }
+      });
+
+      // 2. Generate days
+      let curr = new Date(start);
+      // Align to start of week if we want a perfect calendar, but simple list is ok for mobile
+      // Let's just do every day in the range
+      while (curr <= end) {
+          const dayStr = curr.toLocaleDateString('en-CA');
+          days.push({
+              date: new Date(curr),
+              dayStr,
+              val: map[dayStr] || 0
+          });
+          curr.setDate(curr.getDate() + 1);
+      }
+      return { days, maxVal };
+  }, [transactions, currentRange]);
+
   const groupedTransactions = useMemo(() => {
     const groups = {};
     filteredTransactions.forEach(t => {
@@ -699,6 +733,44 @@ export default function App() {
         ) : (
             // INSIGHTS VIEW
             <div className="space-y-6">
+                {/* Spending Heatmap (NEW) */}
+                {filterMode === 'month' && (
+                    <div className={`p-5 rounded-3xl border ${isDarkMode ? 'bg-[#18181b] border-white/5' : 'bg-white border-slate-200 shadow-sm'}`}>
+                        <h3 className="text-sm font-bold flex items-center gap-2 mb-4">
+                            <Flame className="w-4 h-4 text-orange-500" />
+                            Spending Intensity
+                        </h3>
+                        <div className="grid grid-cols-7 gap-1">
+                            {['S','M','T','W','T','F','S'].map((d, i) => (
+                                <div key={i} className="text-center text-[10px] font-bold text-gray-500 mb-1">{d}</div>
+                            ))}
+                            {/* Empty start padding */}
+                            {Array.from({ length: heatmapData.days.length > 0 ? heatmapData.days[0].date.getDay() : 0 }).map((_, i) => (
+                                <div key={`empty-${i}`} />
+                            ))}
+                            {heatmapData.days.map((day) => {
+                                const intensity = day.val > 0 ? Math.ceil((day.val / heatmapData.maxVal) * 4) : 0; // 0-4 scale
+                                let bgClass = isDarkMode ? 'bg-white/5' : 'bg-gray-100';
+                                if (intensity === 1) bgClass = 'bg-indigo-300';
+                                if (intensity === 2) bgClass = 'bg-indigo-400';
+                                if (intensity === 3) bgClass = 'bg-indigo-500';
+                                if (intensity === 4) bgClass = 'bg-indigo-600';
+                                
+                                return (
+                                    <div 
+                                        key={day.dayStr} 
+                                        className={`aspect-square rounded-md flex items-center justify-center text-[10px] font-medium transition-all ${bgClass} ${day.val > 0 ? 'text-white' : 'text-gray-400'}`}
+                                        title={`${day.dayStr}: ₹${day.val}`}
+                                        onClick={() => day.val > 0 && showToast(`${new Date(day.date).getDate()} ${new Date(day.date).toLocaleString('default', {month:'short'})}: ₹${day.val}`)}
+                                    >
+                                        {new Date(day.date).getDate()}
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    </div>
+                )}
+
                 {/* Spending Trend Chart (Only for Year/Custom view) */}
                 {filterMode !== 'month' && trendData.length > 0 && (
                     <div className={`p-5 rounded-3xl border ${isDarkMode ? 'bg-[#18181b] border-white/5' : 'bg-white border-slate-200 shadow-sm'}`}>
