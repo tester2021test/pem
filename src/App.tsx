@@ -22,7 +22,7 @@ import {
   Plus, Trash2, Wallet, TrendingUp, Download, Search, Pencil, 
   AlertCircle, Moon, Sun, X, Check, ChevronLeft, ChevronRight, 
   ArrowUpRight, ArrowDownRight, Filter, Calendar, LogOut, Lock,
-  AlertTriangle
+  AlertTriangle, CreditCard, Banknote, Landmark
 } from 'lucide-react';
 
 // ==========================================
@@ -180,11 +180,19 @@ export default function App() {
   const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
 
+  // --- Payment Modes State (New) ---
+  const [paymentModes, setPaymentModes] = useState(() => {
+    try { const saved = localStorage.getItem('payment_modes'); return saved ? JSON.parse(saved) : ['Cash', 'UPI', 'Bank Account', 'Credit Card']; } catch(e) { return ['Cash', 'UPI', 'Bank Account', 'Credit Card'] }
+  });
+  const [isAddingPaymentMode, setIsAddingPaymentMode] = useState(false);
+  const [newPaymentModeName, setNewPaymentModeName] = useState('');
+
   // --- Form State ---
   const [formType, setFormType] = useState('expense');
   const [editingId, setEditingId] = useState(null);
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState('');
+  const [paymentMode, setPaymentMode] = useState(''); // New field
   const [description, setDescription] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
 
@@ -232,6 +240,7 @@ export default function App() {
 
   useEffect(() => { localStorage.setItem('monthly_budget', budget); }, [budget]);
   useEffect(() => { localStorage.setItem('custom_categories', JSON.stringify(customCategories)); }, [customCategories]);
+  useEffect(() => { localStorage.setItem('payment_modes', JSON.stringify(paymentModes)); }, [paymentModes]);
 
   // --- Handlers ---
   const handleLogin = async () => {
@@ -263,6 +272,7 @@ export default function App() {
       setFormType(tx.type || 'expense');
       setAmount(tx.amount);
       setCategory(tx.category);
+      setPaymentMode(tx.paymentMode || 'Cash');
       setDescription(tx.description || '');
       setDate(tx.date.toISOString().split('T')[0]);
     } else {
@@ -270,22 +280,25 @@ export default function App() {
       setFormType('expense');
       setAmount('');
       setCategory('');
+      setPaymentMode('Cash');
       setDescription('');
       setDate(new Date().toISOString().split('T')[0]);
     }
     setIsDrawerOpen(true);
   };
 
-  // FIXED: Using stable path for adding/updating documents
   const handleFormSubmit = async (e) => {
     e.preventDefault();
     if (!amount || !user) return;
     
     const finalCategory = category || (formType === 'expense' ? expenseCategories[0] : incomeCategories[0]);
+    const finalPaymentMode = paymentMode || 'Cash';
+
     const txData = {
         type: formType,
         amount: parseFloat(amount),
         category: finalCategory,
+        paymentMode: finalPaymentMode,
         description,
         date: new Date(date),
         updatedAt: Timestamp.now()
@@ -305,7 +318,6 @@ export default function App() {
     } catch (err) { console.error(err); showToast("Save failed", "error"); }
   };
 
-  // FIXED: Using stable path for deleting documents
   const promptDelete = (id, e) => {
     if (e) e.stopPropagation();
     setDeleteModal({ isOpen: true, id });
@@ -342,10 +354,30 @@ export default function App() {
     }
   };
 
+  const handleAddPaymentMode = () => {
+    if (newPaymentModeName.trim()) {
+        const newMode = newPaymentModeName.trim();
+        if (!paymentModes.includes(newMode)) {
+            setPaymentModes([...paymentModes, newMode]);
+            setPaymentMode(newMode);
+            showToast("Payment method added");
+        }
+        setNewPaymentModeName('');
+        setIsAddingPaymentMode(false);
+    }
+  };
+
   const handleExportCSV = () => {
     if (filteredTransactions.length === 0) return showToast("No data to export", "error");
-    const headers = ["Date", "Type", "Category", "Amount", "Description"];
-    const rows = filteredTransactions.map(e => [e.date.toLocaleDateString('en-IN'), e.type || 'expense', e.category, e.amount, `"${e.description||''}"`]);
+    const headers = ["Date", "Type", "Category", "Payment Mode", "Amount", "Description"];
+    const rows = filteredTransactions.map(e => [
+      e.date.toLocaleDateString('en-IN'), 
+      e.type || 'expense', 
+      e.category, 
+      e.paymentMode || 'Cash',
+      e.amount, 
+      `"${e.description||''}"`
+    ]);
     const csvContent = "data:text/csv;charset=utf-8," + headers.join(",") + "\n" + rows.map(e => e.join(",")).join("\n");
     const link = document.createElement("a");
     link.href = encodeURI(csvContent);
@@ -360,7 +392,7 @@ export default function App() {
     return transactions.filter(t => {
         const matchDate = t.date.toISOString().slice(0, 7) === selectedMonth;
         const term = searchTerm.toLowerCase();
-        const matchSearch = !term || t.category.toLowerCase().includes(term) || (t.description||'').toLowerCase().includes(term);
+        const matchSearch = !term || t.category.toLowerCase().includes(term) || (t.description||'').toLowerCase().includes(term) || (t.paymentMode||'').toLowerCase().includes(term);
         const matchCat = categoryFilter === 'All' || t.category === categoryFilter || (categoryFilter === 'Income' && t.type === 'income');
         return matchDate && matchSearch && matchCat;
     });
@@ -396,6 +428,14 @@ export default function App() {
     if (l.includes('food') || l.includes('dine')) return '🍔'; if (l.includes('shop')) return '🛍️'; if (l.includes('transport') || l.includes('fuel')) return '🚕';
     if (l.includes('rent')) return '🏠'; if (l.includes('health')) return '💊'; if (l.includes('entertain')) return '🍿'; if (l.includes('grocery')) return '🥦';
     return '💸';
+  };
+
+  const getPaymentIcon = (mode) => {
+    const l = (mode || '').toLowerCase();
+    if (l.includes('card') || l.includes('credit') || l.includes('debit')) return <CreditCard className="w-3 h-3 text-indigo-400" />;
+    if (l.includes('bank') || l.includes('transfer')) return <Landmark className="w-3 h-3 text-blue-400" />;
+    if (l.includes('upi') || l.includes('gpay')) return <ArrowUpRight className="w-3 h-3 text-purple-400" />;
+    return <Banknote className="w-3 h-3 text-green-400" />;
   };
 
   // --- Main Render Logic ---
@@ -485,7 +525,13 @@ export default function App() {
                                 <div className={`w-10 h-10 rounded-2xl flex items-center justify-center text-lg ${t.type === 'income' ? 'bg-emerald-500/10' : isDarkMode ? 'bg-white/5' : 'bg-slate-100'}`}>{getIcon(t.category, t.type)}</div>
                                 <div className="flex-1 min-w-0">
                                     <h5 className="font-bold text-sm truncate">{t.category}</h5>
-                                    <div className="flex items-center gap-2 text-xs text-gray-500"><span className="truncate max-w-[120px]">{t.description || 'No description'}</span></div>
+                                    <div className="flex items-center gap-2 text-xs text-gray-500">
+                                        <div className="flex items-center gap-1 bg-gray-100 dark:bg-white/5 px-1.5 py-0.5 rounded text-[10px]">
+                                            {getPaymentIcon(t.paymentMode)}
+                                            {t.paymentMode || 'Cash'}
+                                        </div>
+                                        <span className="truncate max-w-[100px]">{t.description || 'No description'}</span>
+                                    </div>
                                 </div>
                                 <div className={`font-bold ${t.type === 'income' ? 'text-emerald-500' : isDarkMode ? 'text-gray-100' : 'text-slate-900'}`}>{t.type === 'income' ? '+' : '-'}₹{t.amount.toLocaleString('en-IN')}</div>
                                 {/* Direct Delete Button - Always visible for accessibility/mobile */}
@@ -542,6 +588,28 @@ export default function App() {
                         </div>
                          <div className="space-y-1.5"><label className="text-xs font-bold text-gray-500 pl-1">Date</label><input type="date" value={date} onChange={e => setDate(e.target.value)} className={`w-full p-3.5 rounded-2xl border outline-none text-sm ${isDarkMode ? 'bg-black/20 border-white/10' : 'bg-gray-50 border-gray-200'}`} /></div>
                     </div>
+
+                    {/* NEW: PAYMENT MODE SECTION */}
+                    <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-gray-500 pl-1">Account / Pay Via</label>
+                        {isAddingPaymentMode ? (
+                            <div className="flex gap-2">
+                                <input type="text" value={newPaymentModeName} onChange={e => setNewPaymentModeName(e.target.value)} placeholder="e.g. HDFC Credit Card" className={`w-full p-3.5 rounded-2xl border outline-none text-sm ${isDarkMode ? 'bg-black/20 border-white/10' : 'bg-gray-50 border-gray-200'}`} />
+                                <button type="button" onClick={handleAddPaymentMode} className="bg-indigo-600 text-white p-3.5 rounded-2xl"><Check className="w-4 h-4"/></button>
+                                <button type="button" onClick={() => setIsAddingPaymentMode(false)} className="bg-gray-200 dark:bg-white/10 p-3.5 rounded-2xl"><X className="w-4 h-4"/></button>
+                            </div>
+                        ) : (
+                            <div className="flex gap-2">
+                                <select value={paymentMode} onChange={e => setPaymentMode(e.target.value)} className={`w-full p-3.5 rounded-2xl border outline-none text-sm appearance-none ${isDarkMode ? 'bg-black/20 border-white/10' : 'bg-gray-50 border-gray-200'}`}>
+                                    {paymentModes.map(m => <option key={m} value={m}>{m}</option>)}
+                                </select>
+                                <button type="button" onClick={() => setIsAddingPaymentMode(true)} className="p-3.5 bg-gray-100 dark:bg-white/5 rounded-2xl border border-transparent dark:border-white/5">
+                                    <Plus className="w-4 h-4 text-gray-500" />
+                                </button>
+                            </div>
+                        )}
+                    </div>
+
                     <div className="space-y-1.5"><label className="text-xs font-bold text-gray-500 pl-1">Description</label><input type="text" placeholder="Note (optional)" value={description} onChange={e => setDescription(e.target.value)} className={`w-full p-3.5 rounded-2xl border outline-none text-sm ${isDarkMode ? 'bg-black/20 border-white/10' : 'bg-gray-50 border-gray-200'}`} /></div>
                     <div className="pt-2 space-y-3">
                         <button type="submit" className={`w-full font-bold py-4 rounded-2xl shadow-lg text-white active:scale-[0.98] transition-all text-lg ${formType === 'income' ? 'bg-emerald-600 shadow-emerald-500/20' : 'bg-indigo-600 shadow-indigo-500/20'}`}>{editingId ? 'Update' : 'Save'} {formType === 'income' ? 'Income' : 'Expense'}</button>
