@@ -24,7 +24,7 @@ import {
   ArrowUpRight, ArrowDownRight, Filter, Calendar, LogOut, Lock,
   AlertTriangle, CreditCard, Banknote, Landmark, PieChart,
   ArrowUpDown, List as ListIcon, LayoutGrid, CalendarRange, BarChart3,
-  Flame, PiggyBank, HandCoins, Target, User, Settings, Smartphone
+  Flame, PiggyBank, HandCoins, Target, User, Settings, Smartphone, FileText
 } from 'lucide-react';
 
 // ==========================================
@@ -437,6 +437,63 @@ export default function App() {
     return <Banknote className="w-3 h-3 text-emerald-500" />;
   };
 
+  // Export Functions
+  const handleExportCSV = () => {
+    if (filteredTransactions.length === 0) return showToast("No data to export", "error");
+    
+    const headers = ["Date", "Type", "Category", "Payment Mode", "Amount", "Description"];
+    const rows = filteredTransactions.map(e => [
+      e.date.toLocaleDateString('en-IN'), 
+      e.type || 'expense', 
+      e.category, 
+      e.paymentMode || 'Cash',
+      e.amount, 
+      `"${(e.description||'').replace(/"/g, '""')}"` // Escape double quotes
+    ]);
+    
+    const csvContent = [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `transactions_${filterMode}_${new Date().toISOString().slice(0,10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportReport = () => {
+    const summaryRows = [
+      ["FINANCIAL REPORT", `Generated on ${new Date().toLocaleDateString()}`],
+      ["Period Type", filterMode.toUpperCase()],
+      ["Range", filterMode === 'custom' ? `${customRange.start} to ${customRange.end}` : referenceDate.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })],
+      [],
+      ["SUMMARY STATS"],
+      ["Total Income", stats.income],
+      ["Total Expense", stats.expense],
+      ["Net Balance", stats.balance],
+      ["Daily Average", stats.dailyAvg],
+      [],
+      ["CATEGORY BREAKDOWN"],
+      ["Category", "Amount", "% of Total"],
+      ...categoryBreakdown.map(c => [c.name, c.value, `${c.pct.toFixed(1)}%`])
+    ];
+
+    const csvContent = summaryRows.map(e => e.join(",")).join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `expense_report_${filterMode}_${new Date().toISOString().slice(0,10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   // Nav Item Component
   const NavButton = ({ icon: Icon, label, active, onClick }) => (
     <button onClick={onClick} className={`flex flex-col items-center gap-1 py-2 px-4 rounded-xl transition-all duration-300 ${active ? 'bg-indigo-50 dark:bg-white/10 text-indigo-600 dark:text-indigo-400 scale-105' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-200'}`}>
@@ -580,6 +637,17 @@ export default function App() {
         {/* === TAB 2: INSIGHTS & BUDGETING === */}
         {activeTab === 'insights' && (
             <div className="space-y-6 animate-in slide-in-from-right-10 duration-300">
+                {/* Header for Insights */}
+                <div className="flex justify-between items-center px-2">
+                    <h2 className="text-xl font-bold tracking-tight">Overview</h2>
+                    <button 
+                        onClick={handleExportReport}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${isDarkMode ? 'bg-white/10 hover:bg-white/20 text-white' : 'bg-white hover:bg-gray-50 text-indigo-600 shadow-sm'}`}
+                    >
+                        <FileText className="w-4 h-4" /> Export Report
+                    </button>
+                </div>
+
                 {/* Category Budgeting Section */}
                 <div className={`p-6 rounded-[2rem] border ${isDarkMode ? 'bg-[#18181b] border-white/5' : 'bg-white border-slate-200 shadow-sm'}`}>
                     <div className="flex items-center justify-between mb-8">
