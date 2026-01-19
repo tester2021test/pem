@@ -52,7 +52,6 @@ const app = initializeApp(firebaseConfig);
 const analytics = typeof window !== 'undefined' ? getAnalytics(app) : null;
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
 // --- Toast Component ---
 const Toast = ({ message, type, onClose }) => {
@@ -163,7 +162,7 @@ export default function App() {
   // --- UI State ---
   const [isDarkMode, setIsDarkMode] = useState(() => localStorage.getItem('theme') === 'dark');
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [deleteModal, setDeleteModal] = useState({ isOpen: false, id: null }); // New state for delete modal
+  const [deleteModal, setDeleteModal] = useState({ isOpen: false, id: null });
   
   // --- Filter State ---
   const [searchTerm, setSearchTerm] = useState('');
@@ -217,9 +216,10 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  // FIXED: Using stable 'users' collection path instead of dynamic artifact path
   useEffect(() => {
     if (!user) return;
-    const ref = collection(db, 'artifacts', appId, 'users', user.uid, 'expenses');
+    const ref = collection(db, 'users', user.uid, 'expenses');
     return onSnapshot(ref, (snap) => {
       const data = snap.docs.map(d => ({
         id: d.id, ...d.data(),
@@ -276,6 +276,7 @@ export default function App() {
     setIsDrawerOpen(true);
   };
 
+  // FIXED: Using stable path for adding/updating documents
   const handleFormSubmit = async (e) => {
     e.preventDefault();
     if (!amount || !user) return;
@@ -291,7 +292,7 @@ export default function App() {
     };
 
     try {
-        const colRef = collection(db, 'artifacts', appId, 'users', user.uid, 'expenses');
+        const colRef = collection(db, 'users', user.uid, 'expenses');
         if (editingId) {
             await updateDoc(doc(colRef, editingId), txData);
             showToast("Updated successfully");
@@ -304,7 +305,7 @@ export default function App() {
     } catch (err) { console.error(err); showToast("Save failed", "error"); }
   };
 
-  // --- Delete Logic ---
+  // FIXED: Using stable path for deleting documents
   const promptDelete = (id, e) => {
     if (e) e.stopPropagation();
     setDeleteModal({ isOpen: true, id });
@@ -313,7 +314,8 @@ export default function App() {
   const confirmDelete = async () => {
     if (!user || !deleteModal.id) return;
     try {
-        await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'expenses', deleteModal.id));
+        const docRef = doc(db, 'users', user.uid, 'expenses', deleteModal.id);
+        await deleteDoc(docRef);
         showToast("Transaction deleted");
         if (editingId === deleteModal.id) {
             setIsDrawerOpen(false);
