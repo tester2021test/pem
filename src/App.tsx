@@ -22,7 +22,8 @@ import {
   Plus, Trash2, Wallet, TrendingUp, Download, Search, Pencil, 
   AlertCircle, Moon, Sun, X, Check, ChevronLeft, ChevronRight, 
   ArrowUpRight, ArrowDownRight, Filter, Calendar, LogOut, Lock,
-  AlertTriangle, CreditCard, Banknote, Landmark
+  AlertTriangle, CreditCard, Banknote, Landmark, PieChart,
+  ArrowUpDown, List as ListIcon, LayoutGrid
 } from 'lucide-react';
 
 // ==========================================
@@ -163,6 +164,8 @@ export default function App() {
   const [isDarkMode, setIsDarkMode] = useState(() => localStorage.getItem('theme') === 'dark');
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [deleteModal, setDeleteModal] = useState({ isOpen: false, id: null });
+  const [viewMode, setViewMode] = useState('list'); // 'list' | 'insights'
+  const [sortMode, setSortMode] = useState('date'); // 'date' | 'amount'
   
   // --- Filter State ---
   const [searchTerm, setSearchTerm] = useState('');
@@ -180,7 +183,7 @@ export default function App() {
   const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
 
-  // --- Payment Modes State (New) ---
+  // --- Payment Modes State ---
   const [paymentModes, setPaymentModes] = useState(() => {
     try { const saved = localStorage.getItem('payment_modes'); return saved ? JSON.parse(saved) : ['Cash', 'UPI', 'Bank Account', 'Credit Card']; } catch(e) { return ['Cash', 'UPI', 'Bank Account', 'Credit Card'] }
   });
@@ -192,7 +195,7 @@ export default function App() {
   const [editingId, setEditingId] = useState(null);
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState('');
-  const [paymentMode, setPaymentMode] = useState(''); // New field
+  const [paymentMode, setPaymentMode] = useState('');
   const [description, setDescription] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
 
@@ -224,7 +227,6 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // FIXED: Using stable 'users' collection path instead of dynamic artifact path
   useEffect(() => {
     if (!user) return;
     const ref = collection(db, 'users', user.uid, 'expenses');
@@ -233,6 +235,7 @@ export default function App() {
         id: d.id, ...d.data(),
         date: d.data().date?.toDate ? d.data().date.toDate() : new Date(d.data().date)
       }));
+      // Initial sort by date
       data.sort((a, b) => b.date - a.date);
       setTransactions(data);
     });
@@ -389,14 +392,20 @@ export default function App() {
   const activeCategories = formType === 'expense' ? [...expenseCategories, ...customCategories] : incomeCategories;
 
   const filteredTransactions = useMemo(() => {
-    return transactions.filter(t => {
+    let filtered = transactions.filter(t => {
         const matchDate = t.date.toISOString().slice(0, 7) === selectedMonth;
         const term = searchTerm.toLowerCase();
         const matchSearch = !term || t.category.toLowerCase().includes(term) || (t.description||'').toLowerCase().includes(term) || (t.paymentMode||'').toLowerCase().includes(term);
         const matchCat = categoryFilter === 'All' || t.category === categoryFilter || (categoryFilter === 'Income' && t.type === 'income');
         return matchDate && matchSearch && matchCat;
     });
-  }, [transactions, selectedMonth, searchTerm, categoryFilter]);
+
+    // Sort Logic
+    return filtered.sort((a, b) => {
+        if (sortMode === 'amount') return b.amount - a.amount;
+        return b.date - a.date; // default newest first
+    });
+  }, [transactions, selectedMonth, searchTerm, categoryFilter, sortMode]);
 
   const stats = useMemo(() => {
     let inc = 0, exp = 0;
@@ -406,6 +415,21 @@ export default function App() {
     const daysPassed = selectedMonth === new Date().toISOString().slice(0, 7) ? today : daysInMonth;
     return { income: inc, expense: exp, balance: inc - exp, dailyAvg: daysPassed > 0 ? Math.round(exp / daysPassed) : 0 };
   }, [filteredTransactions, selectedMonth]);
+
+  // Analytics Stats for Insights View
+  const categoryBreakdown = useMemo(() => {
+      const breakdown = {};
+      let totalExp = 0;
+      filteredTransactions.forEach(t => {
+          if (t.type !== 'income') {
+              breakdown[t.category] = (breakdown[t.category] || 0) + t.amount;
+              totalExp += t.amount;
+          }
+      });
+      return Object.entries(breakdown)
+        .map(([name, value]) => ({ name, value, pct: totalExp > 0 ? (value / totalExp) * 100 : 0 }))
+        .sort((a, b) => b.value - a.value);
+  }, [filteredTransactions]);
 
   const groupedTransactions = useMemo(() => {
     const groups = {};
@@ -468,7 +492,7 @@ export default function App() {
       </div>
 
       <div className="max-w-md mx-auto px-5 pt-6 space-y-6">
-        {/* Dashboard Cards & Charts (Same as previous version) */}
+        {/* Dashboard Cards & Charts */}
         <div className="relative overflow-hidden rounded-[28px] p-6 shadow-2xl shadow-indigo-500/20 bg-gradient-to-br from-[#1e1b4b] to-[#4338ca] text-white">
             <div className="relative z-10">
                 <div className="flex justify-between items-start">
@@ -497,52 +521,115 @@ export default function App() {
             <div className="absolute -top-10 -right-10 w-40 h-40 bg-indigo-500 rounded-full blur-[60px] opacity-30"></div>
         </div>
 
-        {/* Filters */}
-        <div className="sticky top-[73px] z-10 space-y-3 pb-2 pt-2 transition-colors">
-             <div className="flex gap-2">
-                <div className={`flex-1 flex items-center justify-between p-1.5 rounded-2xl border backdrop-blur-md ${isDarkMode ? 'bg-[#09090b]/90 border-white/5' : 'bg-white/95 border-slate-200 shadow-sm'}`}>
-                    <button onClick={() => changeMonth(-1)} className="p-2 hover:bg-gray-100 dark:hover:bg-white/10 rounded-xl"><ChevronLeft className="w-4 h-4"/></button>
-                    <span className="text-sm font-bold flex items-center gap-2"><Calendar className="w-3 h-3 text-gray-400" />{new Date(selectedMonth).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}</span>
-                    <button onClick={() => changeMonth(1)} className="p-2 hover:bg-gray-100 dark:hover:bg-white/10 rounded-xl"><ChevronRight className="w-4 h-4"/></button>
-                </div>
-                <button onClick={handleExportCSV} className={`p-3 rounded-2xl border flex items-center justify-center ${isDarkMode ? 'bg-[#18181b] border-white/5' : 'bg-white border-slate-200 shadow-sm'}`}><Download className="w-5 h-5 text-indigo-500" /></button>
-            </div>
-             <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
-                {uniqueCategories.map(cat => (
-                    <button key={cat} onClick={() => setCategoryFilter(cat)} className={`whitespace-nowrap px-4 py-1.5 rounded-full text-xs font-bold border transition-all ${categoryFilter === cat ? 'bg-indigo-600 border-indigo-600 text-white' : isDarkMode ? 'bg-[#18181b] border-white/10 text-gray-400' : 'bg-white border-slate-200 text-slate-600'}`}>{cat}</button>
-                ))}
-            </div>
+        {/* View Toggle (List vs Analysis) */}
+        <div className={`p-1 rounded-2xl flex ${isDarkMode ? 'bg-[#18181b]' : 'bg-white border border-slate-200'}`}>
+            <button 
+                onClick={() => setViewMode('list')} 
+                className={`flex-1 py-2.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all ${viewMode === 'list' ? (isDarkMode ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-900') : 'text-gray-500'}`}
+            >
+                <ListIcon className="w-4 h-4" /> Transactions
+            </button>
+            <button 
+                onClick={() => setViewMode('insights')} 
+                className={`flex-1 py-2.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all ${viewMode === 'insights' ? (isDarkMode ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-900') : 'text-gray-500'}`}
+            >
+                <LayoutGrid className="w-4 h-4" /> Insights
+            </button>
         </div>
 
-        {/* List */}
-        <div className="space-y-6">
-            {Object.entries(groupedTransactions).map(([dateLabel, txs]) => (
-                <div key={dateLabel}>
-                    <h4 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3 px-1">{dateLabel}</h4>
-                    <div className="space-y-3">
-                        {txs.map((t) => (
-                            <div key={t.id} onClick={() => openDrawer(t)} className={`group flex items-center gap-4 p-4 rounded-2xl border transition-all cursor-pointer active:scale-[0.98] ${isDarkMode ? 'bg-[#18181b] border-white/5 hover:bg-white/5' : 'bg-white border-slate-200 shadow-sm hover:border-indigo-200'}`}>
-                                <div className={`w-10 h-10 rounded-2xl flex items-center justify-center text-lg ${t.type === 'income' ? 'bg-emerald-500/10' : isDarkMode ? 'bg-white/5' : 'bg-slate-100'}`}>{getIcon(t.category, t.type)}</div>
-                                <div className="flex-1 min-w-0">
-                                    <h5 className="font-bold text-sm truncate">{t.category}</h5>
-                                    <div className="flex items-center gap-2 text-xs text-gray-500">
-                                        <div className="flex items-center gap-1 bg-gray-100 dark:bg-white/5 px-1.5 py-0.5 rounded text-[10px]">
-                                            {getPaymentIcon(t.paymentMode)}
-                                            {t.paymentMode || 'Cash'}
-                                        </div>
-                                        <span className="truncate max-w-[100px]">{t.description || 'No description'}</span>
-                                    </div>
-                                </div>
-                                <div className={`font-bold ${t.type === 'income' ? 'text-emerald-500' : isDarkMode ? 'text-gray-100' : 'text-slate-900'}`}>{t.type === 'income' ? '+' : '-'}₹{t.amount.toLocaleString('en-IN')}</div>
-                                {/* Direct Delete Button - Always visible for accessibility/mobile */}
-                                <button onClick={(e) => promptDelete(t.id, e)} className={`p-2 rounded-lg transition-all ${isDarkMode ? 'text-gray-600 hover:text-red-400 hover:bg-white/5' : 'text-gray-300 hover:text-red-500 hover:bg-red-50'}`}><Trash2 className="w-4 h-4" /></button>
-                            </div>
+        {viewMode === 'list' ? (
+            <>
+                {/* Filters */}
+                <div className="sticky top-[73px] z-10 space-y-3 pb-2 pt-2 transition-colors">
+                    <div className="flex gap-2">
+                        <div className={`flex-1 flex items-center justify-between p-1.5 rounded-2xl border backdrop-blur-md ${isDarkMode ? 'bg-[#09090b]/90 border-white/5' : 'bg-white/95 border-slate-200 shadow-sm'}`}>
+                            <button onClick={() => changeMonth(-1)} className="p-2 hover:bg-gray-100 dark:hover:bg-white/10 rounded-xl"><ChevronLeft className="w-4 h-4"/></button>
+                            <span className="text-sm font-bold flex items-center gap-2"><Calendar className="w-3 h-3 text-gray-400" />{new Date(selectedMonth).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}</span>
+                            <button onClick={() => changeMonth(1)} className="p-2 hover:bg-gray-100 dark:hover:bg-white/10 rounded-xl"><ChevronRight className="w-4 h-4"/></button>
+                        </div>
+                        {/* Sort Button */}
+                        <button 
+                            onClick={() => setSortMode(sortMode === 'date' ? 'amount' : 'date')} 
+                            className={`p-3 rounded-2xl border flex items-center justify-center transition-all ${isDarkMode ? 'bg-[#18181b] border-white/5 text-gray-400' : 'bg-white border-slate-200 text-slate-500'} ${sortMode === 'amount' ? 'text-indigo-500 border-indigo-500/50' : ''}`}
+                            title="Sort by Date/Amount"
+                        >
+                            <ArrowUpDown className="w-5 h-5" />
+                        </button>
+                        <button onClick={handleExportCSV} className={`p-3 rounded-2xl border flex items-center justify-center ${isDarkMode ? 'bg-[#18181b] border-white/5' : 'bg-white border-slate-200 shadow-sm'}`}><Download className="w-5 h-5 text-indigo-500" /></button>
+                    </div>
+                    <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
+                        {uniqueCategories.map(cat => (
+                            <button key={cat} onClick={() => setCategoryFilter(cat)} className={`whitespace-nowrap px-4 py-1.5 rounded-full text-xs font-bold border transition-all ${categoryFilter === cat ? 'bg-indigo-600 border-indigo-600 text-white' : isDarkMode ? 'bg-[#18181b] border-white/10 text-gray-400' : 'bg-white border-slate-200 text-slate-600'}`}>{cat}</button>
                         ))}
                     </div>
+                    <div className="relative">
+                        <Search className="absolute left-4 top-3.5 w-4 h-4 text-gray-400" />
+                        <input type="text" placeholder="Search expenses..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className={`w-full pl-10 pr-4 py-3 rounded-2xl border outline-none focus:ring-2 focus:ring-indigo-500/50 ${isDarkMode ? 'bg-[#18181b] border-white/5' : 'bg-white border-slate-200 shadow-sm'}`} />
+                    </div>
                 </div>
-            ))}
-            {Object.keys(groupedTransactions).length === 0 && <div className="text-center py-12 opacity-40"><Filter className="w-12 h-12 mx-auto mb-2" /><p>No transactions</p></div>}
-        </div>
+
+                {/* List */}
+                <div className="space-y-6">
+                    {Object.entries(groupedTransactions).map(([dateLabel, txs]) => (
+                        <div key={dateLabel}>
+                            <h4 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3 px-1">{dateLabel}</h4>
+                            <div className="space-y-3">
+                                {txs.map((t) => (
+                                    <div key={t.id} onClick={() => openDrawer(t)} className={`group flex items-center gap-4 p-4 rounded-2xl border transition-all cursor-pointer active:scale-[0.98] ${isDarkMode ? 'bg-[#18181b] border-white/5 hover:bg-white/5' : 'bg-white border-slate-200 shadow-sm hover:border-indigo-200'}`}>
+                                        <div className={`w-10 h-10 rounded-2xl flex items-center justify-center text-lg ${t.type === 'income' ? 'bg-emerald-500/10' : isDarkMode ? 'bg-white/5' : 'bg-slate-100'}`}>{getIcon(t.category, t.type)}</div>
+                                        <div className="flex-1 min-w-0">
+                                            <h5 className="font-bold text-sm truncate">{t.category}</h5>
+                                            <div className="flex items-center gap-2 text-xs text-gray-500">
+                                                <div className="flex items-center gap-1 bg-gray-100 dark:bg-white/5 px-1.5 py-0.5 rounded text-[10px]">
+                                                    {getPaymentIcon(t.paymentMode)}
+                                                    {t.paymentMode || 'Cash'}
+                                                </div>
+                                                <span className="truncate max-w-[100px]">{t.description || 'No description'}</span>
+                                            </div>
+                                        </div>
+                                        <div className={`font-bold ${t.type === 'income' ? 'text-emerald-500' : isDarkMode ? 'text-gray-100' : 'text-slate-900'}`}>{t.type === 'income' ? '+' : '-'}₹{t.amount.toLocaleString('en-IN')}</div>
+                                        <button onClick={(e) => promptDelete(t.id, e)} className={`p-2 rounded-lg transition-all ${isDarkMode ? 'text-gray-600 hover:text-red-400 hover:bg-white/5' : 'text-gray-300 hover:text-red-500 hover:bg-red-50'}`}><Trash2 className="w-4 h-4" /></button>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    ))}
+                    {Object.keys(groupedTransactions).length === 0 && <div className="text-center py-12 opacity-40"><Filter className="w-12 h-12 mx-auto mb-2" /><p>No transactions</p></div>}
+                </div>
+            </>
+        ) : (
+            // INSIGHTS VIEW
+            <div className="space-y-6">
+                {/* Category Breakdown */}
+                <div className={`p-5 rounded-3xl border ${isDarkMode ? 'bg-[#18181b] border-white/5' : 'bg-white border-slate-200 shadow-sm'}`}>
+                    <h3 className="text-sm font-bold flex items-center gap-2 mb-6">
+                        <PieChart className="w-4 h-4 text-indigo-500" />
+                        Spending By Category
+                    </h3>
+                    <div className="space-y-4">
+                        {categoryBreakdown.length > 0 ? (
+                            categoryBreakdown.map((cat, idx) => (
+                                <div key={cat.name} className="space-y-1.5">
+                                    <div className="flex justify-between text-xs font-medium">
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-lg">{getIcon(cat.name, 'expense')}</span>
+                                            <span>{cat.name}</span>
+                                        </div>
+                                        <span>₹{cat.value.toLocaleString('en-IN')} <span className="text-gray-500 ml-1">({cat.pct.toFixed(0)}%)</span></span>
+                                    </div>
+                                    <div className="h-2 w-full bg-gray-100 dark:bg-white/5 rounded-full overflow-hidden">
+                                        <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${cat.pct}%`, opacity: 1 - (idx * 0.1) }} />
+                                    </div>
+                                </div>
+                            ))
+                        ) : (
+                            <div className="text-center text-gray-500 py-8 text-sm">No expense data for this month</div>
+                        )}
+                    </div>
+                </div>
+            </div>
+        )}
+
       </div>
 
       <button onClick={() => openDrawer()} className="fixed bottom-6 right-6 h-14 w-14 bg-indigo-600 rounded-full text-white shadow-xl flex items-center justify-center hover:scale-110 active:scale-95 transition-all z-30"><Plus className="w-7 h-7" /></button>
