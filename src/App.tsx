@@ -102,8 +102,8 @@ const LoginScreen = ({ onLogin, error }) => (
       <div className="w-20 h-20 bg-gradient-to-tr from-indigo-500 to-purple-600 text-white rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-indigo-500/30 transform -rotate-3">
         <Wallet className="w-10 h-10" />
       </div>
-      <h1 className="text-3xl font-bold text-gray-900 mb-2 tracking-tight">FinManager</h1>
-      <p className="text-gray-500 mb-8 text-sm font-medium">Your personal finance companion</p>
+      <h1 className="text-2xl font-bold text-gray-900 mb-2 tracking-tight">Personal Expense Manager</h1>
+      <p className="text-gray-500 mb-8 text-sm font-medium">by Vivek Narkhede</p>
       
       {error && (
         <div className="mb-6 p-4 bg-rose-50 border border-rose-100 text-rose-600 text-xs rounded-2xl flex items-start gap-2 text-left font-medium">
@@ -519,8 +519,8 @@ export default function App() {
                 <Wallet className="w-5 h-5" />
             </div>
             <div>
-                <h1 className="font-bold text-lg tracking-tight leading-none">FinManager</h1>
-                <p className="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Premium</p>
+                <h1 className="font-bold text-lg tracking-tight leading-none">Expense Manager</h1>
+                <p className="text-[10px] font-medium text-gray-500 uppercase tracking-widest">by Vivek Narkhede</p>
             </div>
         </div>
         <div className="flex gap-2">
