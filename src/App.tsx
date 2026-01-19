@@ -23,7 +23,7 @@ import {
   AlertCircle, Moon, Sun, X, Check, ChevronLeft, ChevronRight, 
   ArrowUpRight, ArrowDownRight, Filter, Calendar, LogOut, Lock,
   AlertTriangle, CreditCard, Banknote, Landmark, PieChart,
-  ArrowUpDown, List as ListIcon, LayoutGrid
+  ArrowUpDown, List as ListIcon, LayoutGrid, CalendarRange, BarChart3
 } from 'lucide-react';
 
 // ==========================================
@@ -167,10 +167,16 @@ export default function App() {
   const [viewMode, setViewMode] = useState('list'); // 'list' | 'insights'
   const [sortMode, setSortMode] = useState('date'); // 'date' | 'amount'
   
-  // --- Filter State ---
+  // --- Filter State (NEW) ---
+  const [filterMode, setFilterMode] = useState('month'); // 'month' | 'year' | 'custom'
+  const [referenceDate, setReferenceDate] = useState(new Date()); // Anchor for Month/Year nav
+  const [customRange, setCustomRange] = useState({
+    start: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0,10),
+    end: new Date().toISOString().slice(0,10)
+  });
+  
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('All');
-  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
   const [budget, setBudget] = useState(() => localStorage.getItem('monthly_budget') || '20000');
   const [isEditingBudget, setIsEditingBudget] = useState(false);
 
@@ -263,10 +269,40 @@ export default function App() {
 
   const showToast = (msg, type = 'success') => setToast({ message: msg, type });
 
-  const changeMonth = (dir) => {
-    const [y, m] = selectedMonth.split('-').map(Number);
-    const d = new Date(y, m - 1 + dir, 15);
-    setSelectedMonth(d.toISOString().slice(0, 7));
+  // Navigation Logic
+  const handleDateNavigate = (direction) => {
+    const newDate = new Date(referenceDate);
+    if (filterMode === 'month') {
+        newDate.setMonth(newDate.getMonth() + direction);
+    } else if (filterMode === 'year') {
+        newDate.setFullYear(newDate.getFullYear() + direction);
+    }
+    setReferenceDate(newDate);
+  };
+
+  const getFilterRange = () => {
+    if (filterMode === 'custom') {
+        return { 
+            start: new Date(customRange.start), 
+            end: new Date(new Date(customRange.end).setHours(23, 59, 59)) 
+        };
+    }
+    
+    const y = referenceDate.getFullYear();
+    const m = referenceDate.getMonth();
+    
+    if (filterMode === 'year') {
+        return {
+            start: new Date(y, 0, 1),
+            end: new Date(y, 11, 31, 23, 59, 59)
+        };
+    }
+    
+    // Default Month
+    return {
+        start: new Date(y, m, 1),
+        end: new Date(y, m + 1, 0, 23, 59, 59) // Last day of month
+    };
   };
 
   const openDrawer = (tx = null) => {
@@ -384,20 +420,30 @@ export default function App() {
     const csvContent = "data:text/csv;charset=utf-8," + headers.join(",") + "\n" + rows.map(e => e.join(",")).join("\n");
     const link = document.createElement("a");
     link.href = encodeURI(csvContent);
-    link.download = `fin_data_${selectedMonth}.csv`;
+    link.download = `fin_data_${filterMode}.csv`;
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
   // --- Computed ---
   const activeCategories = formType === 'expense' ? [...expenseCategories, ...customCategories] : incomeCategories;
 
+  const currentRange = getFilterRange();
+
   const filteredTransactions = useMemo(() => {
+    const { start, end } = currentRange;
+    
     let filtered = transactions.filter(t => {
-        const matchDate = t.date.toISOString().slice(0, 7) === selectedMonth;
+        // Range Check
+        const inRange = t.date >= start && t.date <= end;
+        
+        // Text Search
         const term = searchTerm.toLowerCase();
         const matchSearch = !term || t.category.toLowerCase().includes(term) || (t.description||'').toLowerCase().includes(term) || (t.paymentMode||'').toLowerCase().includes(term);
+        
+        // Category Filter
         const matchCat = categoryFilter === 'All' || t.category === categoryFilter || (categoryFilter === 'Income' && t.type === 'income');
-        return matchDate && matchSearch && matchCat;
+        
+        return inRange && matchSearch && matchCat;
     });
 
     // Sort Logic
@@ -405,16 +451,18 @@ export default function App() {
         if (sortMode === 'amount') return b.amount - a.amount;
         return b.date - a.date; // default newest first
     });
-  }, [transactions, selectedMonth, searchTerm, categoryFilter, sortMode]);
+  }, [transactions, referenceDate, filterMode, customRange, searchTerm, categoryFilter, sortMode]);
 
   const stats = useMemo(() => {
     let inc = 0, exp = 0;
     filteredTransactions.forEach(t => { t.type === 'income' ? inc += t.amount : exp += t.amount; });
-    const daysInMonth = new Date(selectedMonth.split('-')[0], selectedMonth.split('-')[1], 0).getDate();
-    const today = new Date().getDate();
-    const daysPassed = selectedMonth === new Date().toISOString().slice(0, 7) ? today : daysInMonth;
-    return { income: inc, expense: exp, balance: inc - exp, dailyAvg: daysPassed > 0 ? Math.round(exp / daysPassed) : 0 };
-  }, [filteredTransactions, selectedMonth]);
+    
+    // Calculate days for daily average
+    const diffTime = Math.abs(currentRange.end - currentRange.start);
+    const totalDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; 
+    
+    return { income: inc, expense: exp, balance: inc - exp, dailyAvg: totalDays > 0 ? Math.round(exp / totalDays) : 0 };
+  }, [filteredTransactions, currentRange]);
 
   // Analytics Stats for Insights View
   const categoryBreakdown = useMemo(() => {
@@ -431,6 +479,24 @@ export default function App() {
         .sort((a, b) => b.value - a.value);
   }, [filteredTransactions]);
 
+  // Trend Chart Data (Spending by Month/Day)
+  const trendData = useMemo(() => {
+      if (filterMode === 'month') return []; // Don't show trend for month view, show list
+      
+      const trends = {};
+      filteredTransactions.forEach(t => {
+          if (t.type !== 'income') {
+              // Group by Month for Year view, Day for custom short range
+              const key = filterMode === 'year' 
+                ? t.date.toLocaleDateString('en-IN', { month: 'short' })
+                : t.date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+                
+              trends[key] = (trends[key] || 0) + t.amount;
+          }
+      });
+      return Object.entries(trends).map(([name, value]) => ({ name, value }));
+  }, [filteredTransactions, filterMode]);
+
   const groupedTransactions = useMemo(() => {
     const groups = {};
     filteredTransactions.forEach(t => {
@@ -442,9 +508,10 @@ export default function App() {
   }, [filteredTransactions]);
 
   const uniqueCategories = useMemo(() => {
-    const cats = new Set(transactions.filter(t => t.date.toISOString().slice(0,7) === selectedMonth).map(t => t.category));
+    const { start, end } = currentRange;
+    const cats = new Set(transactions.filter(t => t.date >= start && t.date <= end).map(t => t.category));
     return ['All', ...Array.from(cats)];
-  }, [transactions, selectedMonth]);
+  }, [transactions, currentRange]);
 
   const getIcon = (cat, type) => {
     if (type === 'income') return <TrendingUp className="w-5 h-5 text-emerald-500" />;
@@ -541,30 +608,62 @@ export default function App() {
             <>
                 {/* Filters */}
                 <div className="sticky top-[73px] z-10 space-y-3 pb-2 pt-2 transition-colors">
-                    <div className="flex gap-2">
-                        <div className={`flex-1 flex items-center justify-between p-1.5 rounded-2xl border backdrop-blur-md ${isDarkMode ? 'bg-[#09090b]/90 border-white/5' : 'bg-white/95 border-slate-200 shadow-sm'}`}>
-                            <button onClick={() => changeMonth(-1)} className="p-2 hover:bg-gray-100 dark:hover:bg-white/10 rounded-xl"><ChevronLeft className="w-4 h-4"/></button>
-                            <span className="text-sm font-bold flex items-center gap-2"><Calendar className="w-3 h-3 text-gray-400" />{new Date(selectedMonth).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}</span>
-                            <button onClick={() => changeMonth(1)} className="p-2 hover:bg-gray-100 dark:hover:bg-white/10 rounded-xl"><ChevronRight className="w-4 h-4"/></button>
+                    {/* Advanced Date Filter Row */}
+                    <div className="flex flex-col gap-2">
+                        {/* Mode Selector */}
+                        <div className="flex gap-2">
+                            <select 
+                                value={filterMode}
+                                onChange={(e) => setFilterMode(e.target.value)}
+                                className={`px-3 py-2 rounded-xl text-sm font-bold border outline-none ${isDarkMode ? 'bg-[#18181b] border-white/10 text-white' : 'bg-white border-slate-200 text-gray-900'}`}
+                            >
+                                <option value="month">Monthly</option>
+                                <option value="year">Yearly</option>
+                                <option value="custom">Custom</option>
+                            </select>
+
+                            {/* Dynamic Navigator */}
+                            {filterMode === 'custom' ? (
+                                <div className="flex gap-1 flex-1">
+                                    <input type="date" value={customRange.start} onChange={(e) => setCustomRange({...customRange, start: e.target.value})} className={`flex-1 min-w-0 px-2 rounded-xl border outline-none text-xs font-bold ${isDarkMode ? 'bg-[#18181b] border-white/10 text-white' : 'bg-white border-slate-200 text-gray-900'}`} />
+                                    <span className="self-center text-gray-400">-</span>
+                                    <input type="date" value={customRange.end} onChange={(e) => setCustomRange({...customRange, end: e.target.value})} className={`flex-1 min-w-0 px-2 rounded-xl border outline-none text-xs font-bold ${isDarkMode ? 'bg-[#18181b] border-white/10 text-white' : 'bg-white border-slate-200 text-gray-900'}`} />
+                                </div>
+                            ) : (
+                                <div className={`flex-1 flex items-center justify-between p-1.5 rounded-2xl border backdrop-blur-md ${isDarkMode ? 'bg-[#09090b]/90 border-white/5' : 'bg-white/95 border-slate-200 shadow-sm'}`}>
+                                    <button onClick={() => handleDateNavigate(-1)} className="p-2 hover:bg-gray-100 dark:hover:bg-white/10 rounded-xl"><ChevronLeft className="w-4 h-4"/></button>
+                                    <span className="text-sm font-bold flex items-center gap-2">
+                                        <Calendar className="w-3 h-3 text-gray-400" />
+                                        {filterMode === 'month' 
+                                            ? referenceDate.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' }) 
+                                            : referenceDate.getFullYear()}
+                                    </span>
+                                    <button onClick={() => handleDateNavigate(1)} className="p-2 hover:bg-gray-100 dark:hover:bg-white/10 rounded-xl"><ChevronRight className="w-4 h-4"/></button>
+                                </div>
+                            )}
+                            
+                            <button onClick={handleExportCSV} className={`p-3 rounded-2xl border flex items-center justify-center ${isDarkMode ? 'bg-[#18181b] border-white/5' : 'bg-white border-slate-200 shadow-sm'}`}><Download className="w-5 h-5 text-indigo-500" /></button>
                         </div>
-                        {/* Sort Button */}
-                        <button 
-                            onClick={() => setSortMode(sortMode === 'date' ? 'amount' : 'date')} 
-                            className={`p-3 rounded-2xl border flex items-center justify-center transition-all ${isDarkMode ? 'bg-[#18181b] border-white/5 text-gray-400' : 'bg-white border-slate-200 text-slate-500'} ${sortMode === 'amount' ? 'text-indigo-500 border-indigo-500/50' : ''}`}
-                            title="Sort by Date/Amount"
-                        >
-                            <ArrowUpDown className="w-5 h-5" />
-                        </button>
-                        <button onClick={handleExportCSV} className={`p-3 rounded-2xl border flex items-center justify-center ${isDarkMode ? 'bg-[#18181b] border-white/5' : 'bg-white border-slate-200 shadow-sm'}`}><Download className="w-5 h-5 text-indigo-500" /></button>
+                        
+                        {/* Sort & Search Row */}
+                        <div className="flex gap-2">
+                             <button 
+                                onClick={() => setSortMode(sortMode === 'date' ? 'amount' : 'date')} 
+                                className={`flex-1 py-2 rounded-xl border flex items-center justify-center gap-2 text-xs font-bold transition-all ${isDarkMode ? 'bg-[#18181b] border-white/5 text-gray-400' : 'bg-white border-slate-200 text-slate-500'} ${sortMode === 'amount' ? 'text-indigo-500 border-indigo-500/50' : ''}`}
+                            >
+                                <ArrowUpDown className="w-3 h-3" /> {sortMode === 'date' ? 'Date' : 'Amount'}
+                            </button>
+                            <div className="relative flex-[2]">
+                                <Search className="absolute left-3 top-2.5 w-3 h-3 text-gray-400" />
+                                <input type="text" placeholder="Search..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className={`w-full pl-8 pr-3 py-2 rounded-xl border outline-none text-xs ${isDarkMode ? 'bg-[#18181b] border-white/5' : 'bg-white border-slate-200 shadow-sm'}`} />
+                            </div>
+                        </div>
                     </div>
+
                     <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
                         {uniqueCategories.map(cat => (
                             <button key={cat} onClick={() => setCategoryFilter(cat)} className={`whitespace-nowrap px-4 py-1.5 rounded-full text-xs font-bold border transition-all ${categoryFilter === cat ? 'bg-indigo-600 border-indigo-600 text-white' : isDarkMode ? 'bg-[#18181b] border-white/10 text-gray-400' : 'bg-white border-slate-200 text-slate-600'}`}>{cat}</button>
                         ))}
-                    </div>
-                    <div className="relative">
-                        <Search className="absolute left-4 top-3.5 w-4 h-4 text-gray-400" />
-                        <input type="text" placeholder="Search expenses..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className={`w-full pl-10 pr-4 py-3 rounded-2xl border outline-none focus:ring-2 focus:ring-indigo-500/50 ${isDarkMode ? 'bg-[#18181b] border-white/5' : 'bg-white border-slate-200 shadow-sm'}`} />
                     </div>
                 </div>
 
@@ -600,6 +699,33 @@ export default function App() {
         ) : (
             // INSIGHTS VIEW
             <div className="space-y-6">
+                {/* Spending Trend Chart (Only for Year/Custom view) */}
+                {filterMode !== 'month' && trendData.length > 0 && (
+                    <div className={`p-5 rounded-3xl border ${isDarkMode ? 'bg-[#18181b] border-white/5' : 'bg-white border-slate-200 shadow-sm'}`}>
+                        <h3 className="text-sm font-bold flex items-center gap-2 mb-4">
+                            <BarChart3 className="w-4 h-4 text-indigo-500" />
+                            Spending Trend
+                        </h3>
+                        <div className="flex items-end gap-2 h-32">
+                            {trendData.map((item, idx) => {
+                                const maxVal = Math.max(...trendData.map(d => d.value));
+                                const heightPct = maxVal > 0 ? (item.value / maxVal) * 100 : 0;
+                                return (
+                                    <div key={item.name} className="flex-1 flex flex-col justify-end items-center gap-1 group">
+                                        <div className="w-full bg-indigo-500/20 rounded-t-sm relative h-full flex items-end">
+                                            <div 
+                                                className="w-full bg-indigo-500 rounded-t-sm transition-all duration-500 group-hover:bg-indigo-400" 
+                                                style={{ height: `${heightPct}%` }}
+                                            />
+                                        </div>
+                                        <span className="text-[10px] text-gray-500 truncate w-full text-center">{item.name}</span>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
+
                 {/* Category Breakdown */}
                 <div className={`p-5 rounded-3xl border ${isDarkMode ? 'bg-[#18181b] border-white/5' : 'bg-white border-slate-200 shadow-sm'}`}>
                     <h3 className="text-sm font-bold flex items-center gap-2 mb-6">
@@ -623,7 +749,7 @@ export default function App() {
                                 </div>
                             ))
                         ) : (
-                            <div className="text-center text-gray-500 py-8 text-sm">No expense data for this month</div>
+                            <div className="text-center text-gray-500 py-8 text-sm">No expense data for this range</div>
                         )}
                     </div>
                 </div>
